@@ -90,9 +90,16 @@ int main(void)
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   int mode = 1; // 1 is for refint, -1 is for temperature
-  uint32_t adcVolts;
-  float tempCelcius;
+  uint32_t fromADC;
+  float measured_vref = 3300.0;
+  int tempCelcius_int;
+  float tempCelcius_flt;
+  float tempCalV1 = (float) (*TEMPSENSOR_CAL1_ADDR);
+  float tempCalV2 = (float) (*TEMPSENSOR_CAL2_ADDR);
+  float tempCoef = (float)(TEMPSENSOR_CAL2_TEMP-TEMPSENSOR_CAL1_TEMP)/ (tempCalV2 - tempCalV1);
+
   ADC_ChannelConfTypeDef sConfig = {0};
+  uint16_t  VREFINT_CAL;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -110,11 +117,11 @@ int main(void)
 
 	  if (mode == -1){
 		  sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
-		  sConfig.SamplingTime = ADC_SAMPLETIME_47CYCLES_5;
+		  sConfig.SamplingTime = ADC_SAMPLETIME_247CYCLES_5;
       }
 	  else{
 		  sConfig.Channel = ADC_CHANNEL_VREFINT;
-		  sConfig.SamplingTime = ADC_SAMPLETIME_47CYCLES_5;
+		  sConfig.SamplingTime = ADC_SAMPLETIME_640CYCLES_5;
 	  }
 	  sConfig.Rank = ADC_REGULAR_RANK_1;
 	  sConfig.SingleDiff = ADC_SINGLE_ENDED;
@@ -129,14 +136,19 @@ int main(void)
 
 	  if (mode == -1){
 		  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){
-	    	  adcVolts = HAL_ADC_GetValue(&hadc1);
-	    	  // a) the internal reference voltage and b) the internal temperature sensor.
-	    	  tempCelcius = (float) __HAL_ADC_CALC_TEMPERATURE(3300,  HAL_ADC_GetValue(&hadc1), ADC_RESOLUTION_12B);
+	    	  // * (TS_DATA – TS_CAL1) + 30
+	    	  tempCelcius_int = __HAL_ADC_CALC_TEMPERATURE( (int)measured_vref,
+	    			  HAL_ADC_GetValue(&hadc1), ADC_RESOLUTION_12B);
+	    	  tempCelcius_flt = 30.0 + tempCoef *
+	    			  ((float)HAL_ADC_GetValue(&hadc1)*measured_vref/3000.0 - tempCalV1);
 		  }
       }
 	  else {
 		  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){
-	    	  adcVolts = HAL_ADC_GetValue(&hadc1);
+			  // VREF+ = VREF+_Charac  * VREFINT_CAL / VREFINT_DATA
+			  VREFINT_CAL = *VREFINT_CAL_ADDR;
+			  fromADC = HAL_ADC_GetValue(&hadc1);
+			  measured_vref = 3000.0 * (float)VREFINT_CAL / (float)fromADC;
 		  }
 	  }
 
