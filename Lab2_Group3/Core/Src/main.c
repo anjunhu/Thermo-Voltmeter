@@ -89,8 +89,10 @@ int main(void)
   MX_GPIO_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
+  int mode = 1; // 1 is for refint, -1 is for temperature
   uint32_t adcVolts;
   float tempCelcius;
+  ADC_ChannelConfTypeDef sConfig = {0};
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -98,19 +100,46 @@ int main(void)
 
   while (1)
   {
-	  if(!HAL_GPIO_ReadPin(USER_BUTTON_GPIO_Port, USER_BUTTON_Pin)){
+	  if(!HAL_GPIO_ReadPin(USER_BUTTON_GPIO_Port, USER_BUTTON_Pin)){ // RESET=0U
 		  HAL_Delay(10);
-		  if(!HAL_GPIO_ReadPin(USER_BUTTON_GPIO_Port, USER_BUTTON_Pin)){
+		  if(HAL_GPIO_ReadPin(USER_BUTTON_GPIO_Port, USER_BUTTON_Pin)){
 		  		  HAL_GPIO_TogglePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin);
+		  		  mode *= -1;
 		  }
 	  }
 
-	  HAL_ADC_Start(&hadc1);
-      if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){	//checks if conversion is done
-    	  adcVolts = HAL_ADC_GetValue(&hadc1);
-    	  // a) the internal reference voltage and b) the internal temperature sensor.
-    	  tempCelcius = (float) __HAL_ADC_CALC_TEMPERATURE(3300,  HAL_ADC_GetValue(&hadc1), ADC_RESOLUTION_12B);
+	  if (mode == -1){
+		  sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
+		  sConfig.SamplingTime = ADC_SAMPLETIME_47CYCLES_5;
       }
+	  else{
+		  sConfig.Channel = ADC_CHANNEL_VREFINT;
+		  sConfig.SamplingTime = ADC_SAMPLETIME_47CYCLES_5;
+	  }
+	  sConfig.Rank = ADC_REGULAR_RANK_1;
+	  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+	  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+	  sConfig.Offset = 0;
+
+	  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+		  Error_Handler();
+	  }
+	  HAL_ADC_Start(&hadc1);
+
+
+	  if (mode == -1){
+		  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){
+	    	  adcVolts = HAL_ADC_GetValue(&hadc1);
+	    	  // a) the internal reference voltage and b) the internal temperature sensor.
+	    	  tempCelcius = (float) __HAL_ADC_CALC_TEMPERATURE(3300,  HAL_ADC_GetValue(&hadc1), ADC_RESOLUTION_12B);
+		  }
+      }
+	  else {
+		  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){
+	    	  adcVolts = HAL_ADC_GetValue(&hadc1);
+		  }
+	  }
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -222,7 +251,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;//ADC_CHANNEL_VREFINT; //
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_12CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_47CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
