@@ -22,7 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+//#define START_WITH_TEMP 1
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,6 +57,17 @@ static void MX_ADC1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+uint32_t fromADC;
+float measured_vref = 3300.0;
+int tempCelcius_int;
+float tempCelcius_flt;
+
+#ifdef  START_WITH_TEMP
+int mode = -1;
+#else
+int mode = 1;	// 1 is for REFINT, -1 is for TEMPERATURE
+#endif
+
 /* USER CODE END 0 */
 
 /**
@@ -89,17 +100,12 @@ int main(void)
   MX_GPIO_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
-  int mode = 1; // 1 is for refint, -1 is for temperature
-  uint32_t fromADC;
-  float measured_vref = 3300.0;
-  int tempCelcius_int;
-  float tempCelcius_flt;
+  HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
   float tempCalV1 = (float) (*TEMPSENSOR_CAL1_ADDR);
   float tempCalV2 = (float) (*TEMPSENSOR_CAL2_ADDR);
   float tempCoef = (float)(TEMPSENSOR_CAL2_TEMP-TEMPSENSOR_CAL1_TEMP)/ (tempCalV2 - tempCalV1);
-
   ADC_ChannelConfTypeDef sConfig = {0};
-  uint16_t  VREFINT_CAL;
+  uint16_t  VREFINT_CAL = *VREFINT_CAL_ADDR;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -117,12 +123,11 @@ int main(void)
 
 	  if (mode == -1){
 		  sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
-		  sConfig.SamplingTime = ADC_SAMPLETIME_247CYCLES_5;
       }
 	  else{
 		  sConfig.Channel = ADC_CHANNEL_VREFINT;
-		  sConfig.SamplingTime = ADC_SAMPLETIME_640CYCLES_5;
 	  }
+	  sConfig.SamplingTime = ADC_SAMPLETIME_92CYCLES_5;
 	  sConfig.Rank = ADC_REGULAR_RANK_1;
 	  sConfig.SingleDiff = ADC_SINGLE_ENDED;
 	  sConfig.OffsetNumber = ADC_OFFSET_NONE;
@@ -136,9 +141,11 @@ int main(void)
 
 	  if (mode == -1){
 		  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){
-	    	  // * (TS_DATA – TS_CAL1) + 30
+	    	  // (tempCalT2 - tempCalT1)/ (tempCalV2 - tempCalV1)* (TS_DATA – TS_CAL1) + 30
 	    	  tempCelcius_int = __HAL_ADC_CALC_TEMPERATURE( (int)measured_vref,
 	    			  HAL_ADC_GetValue(&hadc1), ADC_RESOLUTION_12B);
+	    	  // TSCAL data are acquired at VREF+char=3.0 V
+	    	  // For a different VREF+, scale the readout in the formula by TSDATA*(VREF+actual/VREF+char)
 	    	  tempCelcius_flt = 30.0 + tempCoef *
 	    			  ((float)HAL_ADC_GetValue(&hadc1)*measured_vref/3000.0 - tempCalV1);
 		  }
@@ -146,7 +153,6 @@ int main(void)
 	  else {
 		  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){
 			  // VREF+ = VREF+_Charac  * VREFINT_CAL / VREFINT_DATA
-			  VREFINT_CAL = *VREFINT_CAL_ADDR;
 			  fromADC = HAL_ADC_GetValue(&hadc1);
 			  measured_vref = 3000.0 * (float)VREFINT_CAL / (float)fromADC;
 		  }
@@ -261,7 +267,11 @@ static void MX_ADC1_Init(void)
   }
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;//ADC_CHANNEL_VREFINT; //
+#ifdef  START_WITH_TEMP
+  sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
+#else
+  sConfig.Channel = ADC_CHANNEL_VREFINT;
+#endif
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SamplingTime = ADC_SAMPLETIME_47CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
@@ -291,7 +301,11 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+#ifdef  START_WITH_TEMP
+  HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_SET);
+#else
   HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
+#endif
 
   /*Configure GPIO pin : USER_BUTTON_Pin */
   GPIO_InitStruct.Pin = USER_BUTTON_Pin;
