@@ -127,7 +127,7 @@ int main(void)
 	  else{
 		  sConfig.Channel = ADC_CHANNEL_VREFINT;
 	  }
-	  sConfig.SamplingTime = ADC_SAMPLETIME_92CYCLES_5;
+	  sConfig.SamplingTime = ADC_SAMPLETIME_247CYCLES_5;
 	  sConfig.Rank = ADC_REGULAR_RANK_1;
 	  sConfig.SingleDiff = ADC_SINGLE_ENDED;
 	  sConfig.OffsetNumber = ADC_OFFSET_NONE;
@@ -136,7 +136,10 @@ int main(void)
 	  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
 		  Error_Handler();
 	  }
-	  HAL_ADC_Start(&hadc1);
+
+	  if (HAL_ADC_Start(&hadc1) != HAL_OK) {
+		  Error_Handler();
+	  }
 
 
 	  if (mode == -1){
@@ -162,6 +165,9 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
   }
+//  if (HAL_ADC_Stop(&hadc1) != HAL_OK) {
+//	  Error_Handler();
+//  }
   /* USER CODE END 3 */
 }
 
@@ -273,7 +279,7 @@ static void MX_ADC1_Init(void)
   sConfig.Channel = ADC_CHANNEL_VREFINT;
 #endif
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_47CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_247CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
