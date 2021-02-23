@@ -56,18 +56,11 @@ static void MX_ADC1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
 uint32_t fromADC;
 float measured_vref = 3300.0;
+float vref_checker;
 int tempCelcius_int;
 float tempCelcius_flt;
-
-#ifdef  START_WITH_TEMP
-int mode = -1;
-#else
-int mode = 1;	// 1 is for REFINT, -1 is for TEMPERATURE
-#endif
-
 /* USER CODE END 0 */
 
 /**
@@ -114,50 +107,52 @@ int main(void)
   while (1)
   {
 	  if(!HAL_GPIO_ReadPin(USER_BUTTON_GPIO_Port, USER_BUTTON_Pin)){ // RESET=0U
-		  HAL_Delay(10);
-		  if(HAL_GPIO_ReadPin(USER_BUTTON_GPIO_Port, USER_BUTTON_Pin)){
-		  		  HAL_GPIO_TogglePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin);
-		  		  mode *= -1;
+		  HAL_Delay(1);
+		  if(HAL_GPIO_ReadPin(USER_BUTTON_GPIO_Port, USER_BUTTON_Pin)){ // SET=1U, a rising edge is detected
+		  	HAL_GPIO_TogglePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin); // toggle LED mode
 		  }
 	  }
 
-	  if (mode == -1){
+	  if (HAL_GPIO_ReadPin(LED_GREEN_GPIO_Port, LED_GREEN_Pin)){ // if LED is on we are measuring temperature
 		  sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
       }
-	  else{
+	  else{ // if LED is off we are measuring Vref
 		  sConfig.Channel = ADC_CHANNEL_VREFINT;
 	  }
-	  sConfig.SamplingTime = ADC_SAMPLETIME_247CYCLES_5;
-	  sConfig.Rank = ADC_REGULAR_RANK_1;
-	  sConfig.SingleDiff = ADC_SINGLE_ENDED;
-	  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+	  sConfig.SamplingTime = ADC_SAMPLETIME_640CYCLES_5; // slower sampling rate is safer
+	  sConfig.Rank = ADC_REGULAR_RANK_1; // no sequencing concerns since we are measuring one thing at a time
+	  sConfig.SingleDiff = ADC_SINGLE_ENDED; // non-differential ending
+	  sConfig.OffsetNumber = ADC_OFFSET_NONE; // no offset
 	  sConfig.Offset = 0;
 
-	  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+	  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) { // ensure reconfiguration is ok
 		  Error_Handler();
 	  }
 
-	  if (HAL_ADC_Start(&hadc1) != HAL_OK) {
+	  if (HAL_ADC_Start(&hadc1) != HAL_OK) { // ensure everything is enabled, state bitfield is clean, etc.
 		  Error_Handler();
 	  }
 
-
-	  if (mode == -1){
-		  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){
-	    	  // (tempCalT2 - tempCalT1)/ (tempCalV2 - tempCalV1)* (TS_DATA – TS_CAL1) + 30
-	    	  tempCelcius_int = __HAL_ADC_CALC_TEMPERATURE( (int)measured_vref,
-	    			  HAL_ADC_GetValue(&hadc1), ADC_RESOLUTION_12B);
+	  if (HAL_GPIO_ReadPin(LED_GREEN_GPIO_Port, LED_GREEN_Pin)){ // if LED is on we are measuring temperature
+		  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){ //
+			  fromADC = HAL_ADC_GetValue(&hadc1); // fetch reading from ADC data register as an uint32_t
+	    	  // the auto generated helper macro for sanity check
+	    	  tempCelcius_int = __HAL_ADC_CALC_TEMPERATURE( (int)measured_vref, fromADC, ADC_RESOLUTION_12B);
+	    	  // T = tempCoef * (TS_DATA – TS_CAL1) + 30
+	    	  // where tempCoef = (tempCalT2 - tempCalT1)/ (tempCalV2 - tempCalV1) doesn't change
+	    	  // so it only has to be calculated once before the while loop
 	    	  // TSCAL data are acquired at VREF+char=3.0 V
 	    	  // For a different VREF+, scale the readout in the formula by TSDATA*(VREF+actual/VREF+char)
 	    	  tempCelcius_flt = 30.0 + tempCoef *
-	    			  ((float)HAL_ADC_GetValue(&hadc1)*measured_vref/3000.0 - tempCalV1);
+	    			  ((float)fromADC * measured_vref / 3000.0 - tempCalV1);
 		  }
       }
-	  else {
+	  else { // if LED is off we are measuring Vref
 		  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){
+			  fromADC = HAL_ADC_GetValue(&hadc1);// fetch reading from ADC data register as an uint32_t
 			  // VREF+ = VREF+_Charac  * VREFINT_CAL / VREFINT_DATA
-			  fromADC = HAL_ADC_GetValue(&hadc1);
 			  measured_vref = 3000.0 * (float)VREFINT_CAL / (float)fromADC;
+			  vref_checker = __LL_ADC_CALC_VREFANALOG_VOLTAGE(fromADC, ADC_RESOLUTION_12B);
 		  }
 	  }
 
@@ -165,9 +160,9 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
   }
-//  if (HAL_ADC_Stop(&hadc1) != HAL_OK) {
-//	  Error_Handler();
-//  }
+  if (HAL_ADC_Stop(&hadc1) != HAL_OK) {
+	  Error_Handler();
+  }
   /* USER CODE END 3 */
 }
 
@@ -279,7 +274,7 @@ static void MX_ADC1_Init(void)
   sConfig.Channel = ADC_CHANNEL_VREFINT;
 #endif
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_247CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_640CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
