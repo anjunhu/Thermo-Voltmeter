@@ -22,7 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-//#define START_WITH_TEMP 1
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -56,11 +56,12 @@ static void MX_ADC1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+//#define START_WITH_TEMP 1
 uint32_t fromADC;
-float measured_vref = 3300.0;
-float vref_checker;
-int tempCelcius_int;
-float tempCelcius_flt;
+float vref_measured = 3300.0;
+float vref_HALchecker;
+float tempCelcius_measured;
+float tempCelcius_HALchecker;
 /* USER CODE END 0 */
 
 /**
@@ -93,7 +94,10 @@ int main(void)
   MX_GPIO_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
+  HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED); // calibrate for better Vref
+  // T = tempCoef * (TS_DATA  TS_CAL1) + 30
+  // where tempCoef = (tempCalT2 - tempCalT1)/ (tempCalV2 - tempCalV1) doesn't change
+  // so it only has to be calculated once before the while loop
   float tempCalV1 = (float) (*TEMPSENSOR_CAL1_ADDR);
   float tempCalV2 = (float) (*TEMPSENSOR_CAL2_ADDR);
   float tempCoef = (float)(TEMPSENSOR_CAL2_TEMP-TEMPSENSOR_CAL1_TEMP)/ (tempCalV2 - tempCalV1);
@@ -103,7 +107,9 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-
+  if (HAL_ADC_Start(&hadc1) != HAL_OK) { // ensure everything is enabled, state bitfield is clean, etc.
+	  Error_Handler();
+  }
   while (1)
   {
 	  if(!HAL_GPIO_ReadPin(USER_BUTTON_GPIO_Port, USER_BUTTON_Pin)){ // RESET=0U
@@ -113,48 +119,28 @@ int main(void)
 		  }
 	  }
 
-	  if (HAL_GPIO_ReadPin(LED_GREEN_GPIO_Port, LED_GREEN_Pin)){ // if LED is on we are measuring temperature
-		  sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
-      }
-	  else{ // if LED is off we are measuring Vref
-		  sConfig.Channel = ADC_CHANNEL_VREFINT;
-	  }
-	  sConfig.SamplingTime = ADC_SAMPLETIME_640CYCLES_5; // slower sampling rate is safer
-	  sConfig.Rank = ADC_REGULAR_RANK_1; // no sequencing concerns since we are measuring one thing at a time
-	  sConfig.SingleDiff = ADC_SINGLE_ENDED; // non-differential ending
-	  sConfig.OffsetNumber = ADC_OFFSET_NONE; // no offset
-	  sConfig.Offset = 0;
 
-	  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) { // ensure reconfiguration is ok
-		  Error_Handler();
-	  }
 
-	  if (HAL_ADC_Start(&hadc1) != HAL_OK) { // ensure everything is enabled, state bitfield is clean, etc.
-		  Error_Handler();
-	  }
+		if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){ // Wait for regular group conversion to be completed
+				  fromADC = HAL_ADC_GetValue(&hadc1);// fetch reading from ADC data register as an uint32_t
+				  // VREF+ = VREF+_Charac  * VREFINT_CAL / VREFINT_DATA
+				  vref_measured = 3000.0 * (float)VREFINT_CAL / (float)fromADC;
+				  // the auto generated helper macro for sanity check
+				  vref_HALchecker = __LL_ADC_CALC_VREFANALOG_VOLTAGE(fromADC, ADC_RESOLUTION_12B);
+		}
 
-	  if (HAL_GPIO_ReadPin(LED_GREEN_GPIO_Port, LED_GREEN_Pin)){ // if LED is on we are measuring temperature
-		  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){ //
+	  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){ // Wait for regular group conversion to be completed
 			  fromADC = HAL_ADC_GetValue(&hadc1); // fetch reading from ADC data register as an uint32_t
 	    	  // the auto generated helper macro for sanity check
-	    	  tempCelcius_int = __HAL_ADC_CALC_TEMPERATURE( (int)measured_vref, fromADC, ADC_RESOLUTION_12B);
-	    	  // T = tempCoef * (TS_DATA – TS_CAL1) + 30
-	    	  // where tempCoef = (tempCalT2 - tempCalT1)/ (tempCalV2 - tempCalV1) doesn't change
-	    	  // so it only has to be calculated once before the while loop
-	    	  // TSCAL data are acquired at VREF+char=3.0 V
-	    	  // For a different VREF+, scale the readout in the formula by TSDATA*(VREF+actual/VREF+char)
-	    	  tempCelcius_flt = 30.0 + tempCoef *
-	    			  ((float)fromADC * measured_vref / 3000.0 - tempCalV1);
+			  tempCelcius_HALchecker = __HAL_ADC_CALC_TEMPERATURE(vref_measured, fromADC, ADC_RESOLUTION_12B);
+	    	  // T = tempCoef * (TS_DATA �? TS_CAL1) + 30, where TSCAL data are acquired at VREF+char=3.0 V
+	    	  // Our Vref is not 3.0V, need to scale the readout in the formula by TSDATA*(VREF+actual/VREF+char)
+	    	  tempCelcius_measured = 30.0 + tempCoef *
+	    			  ((float)fromADC * vref_measured / 3000.0 - tempCalV1);
 		  }
-      }
-	  else { // if LED is off we are measuring Vref
-		  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK){
-			  fromADC = HAL_ADC_GetValue(&hadc1);// fetch reading from ADC data register as an uint32_t
-			  // VREF+ = VREF+_Charac  * VREFINT_CAL / VREFINT_DATA
-			  measured_vref = 3000.0 * (float)VREFINT_CAL / (float)fromADC;
-			  vref_checker = __LL_ADC_CALC_VREFANALOG_VOLTAGE(fromADC, ADC_RESOLUTION_12B);
-		  }
-	  }
+
+
+
 
     /* USER CODE END WHILE */
 
@@ -252,10 +238,10 @@ static void MX_ADC1_Init(void)
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.ContinuousConvMode = ENABLE;
+  hadc1.Init.NbrOfConversion = 2;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
@@ -268,11 +254,7 @@ static void MX_ADC1_Init(void)
   }
   /** Configure Regular Channel
   */
-#ifdef  START_WITH_TEMP
   sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
-#else
-  sConfig.Channel = ADC_CHANNEL_VREFINT;
-#endif
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SamplingTime = ADC_SAMPLETIME_640CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
@@ -282,6 +264,9 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+  /** Configure Regular Channel
+  */
+
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
@@ -302,11 +287,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-#ifdef  START_WITH_TEMP
-  HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_SET);
-#else
   HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
-#endif
 
   /*Configure GPIO pin : USER_BUTTON_Pin */
   GPIO_InitStruct.Pin = USER_BUTTON_Pin;
